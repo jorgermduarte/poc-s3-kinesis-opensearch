@@ -53,3 +53,11 @@ The Kinesis consumer service:
   npm install
   npm start
 ```
+
+# S3 File submission
+
+Before the submission and having all the services executed we can see that we don't have any data for the products index.
+![Opensearch before file submission](./resources/products_index_before_s3_submission.png)
+
+After the .json file submission to S3 and given the mock trigger to kinesis, we can verify that the product is added correctly.
+![Opensearch after file submission](./resources/products_index_after_s3_submission.png)
