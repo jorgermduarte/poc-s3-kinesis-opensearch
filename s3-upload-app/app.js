@@ -37,22 +37,6 @@ const kinesisClient = new KinesisClient(awsConfig);
 const BUCKET_NAME = 's3-upload-bucket';
 const KINESIS_STREAM_NAME = 'file-upload-stream';
 
-// Helper function to execute shell commands
-function executeCommand(command) {
-  const { exec } = require('child_process');
-  return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        console.warn(`Command execution warning: ${error.message}`);
-        // Don't reject as LocalStack might return errors if resources already exist
-        resolve(stderr || stdout);
-        return;
-      }
-      resolve(stdout);
-    });
-  });
-}
-
 // Routes
 app.post('/kinesis/s3/files', upload.single('file'), async (req, res) => {
   try {

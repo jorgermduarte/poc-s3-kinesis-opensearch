@@ -77,21 +77,56 @@
             try {
                 const response = await fetch('http://localhost:3000/json-samples');
                 const files = await response.json();
-
-                // craete a list of files and append to the json-samples id div
                 const jsonSamplesDiv = document.getElementById('json-samples');
-
+        
                 files.forEach(file => {
                     const fileButton = document.createElement('button');
                     fileButton.textContent = file;
                     fileButton.type = 'button';
                     fileButton.style.backgroundColor = 'gray';
-                    fileButton.onclick = function() {
-                        const fileInput = document.getElementById('fileInput');
-                        const dataTransfer = new DataTransfer();
-                        dataTransfer.items.add(new File([file], file, { type: 'application/json' }));
-                        fileInput.files = dataTransfer.files;
+                    fileButton.style.margin = '5px';
+                    fileButton.style.padding = '8px';
+                    
+                    // Add loading state
+                    const statusSpan = document.createElement('span');
+                    statusSpan.style.marginLeft = '10px';
+                    fileButton.appendChild(statusSpan);
+        
+                    fileButton.onclick = async function() {
+                        try {
+                            // Show loading state
+                            statusSpan.textContent = '⏳ Loading...';
+                            fileButton.disabled = true;
+        
+                            // Fetch actual JSON file content
+                            const fileResponse = await fetch(`http://localhost:3000/json-samples/${file}`);
+                            if (!fileResponse.ok) throw new Error('Failed to fetch file');
+                            
+                            const jsonContent = await fileResponse.json();
+                            const jsonBlob = new Blob([JSON.stringify(jsonContent)], { type: 'application/json' });
+        
+                            // Create file with actual content
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(new File([jsonBlob], file, { 
+                                type: 'application/json',
+                                lastModified: Date.now()
+                            }));
+        
+                            const fileInput = document.getElementById('fileInput');
+                            fileInput.files = dataTransfer.files;
+                            
+                            // Show success feedback
+                            statusSpan.textContent = '✅ Loaded';
+                            setTimeout(() => statusSpan.textContent = '', 2000);
+                        } catch (error) {
+                            console.error('Error loading file:', error);
+                            statusSpan.textContent = '❌ Error';
+                            setTimeout(() => statusSpan.textContent = '', 2000);
+                        } finally {
+                            fileButton.disabled = false;
+                        }
                     };
+        
                     jsonSamplesDiv.appendChild(fileButton);
                 });
                 

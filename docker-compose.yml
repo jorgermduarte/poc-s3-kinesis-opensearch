@@ -39,3 +39,28 @@ services:
       
       echo 'Initialization complete!'
       "
+
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    volumes:
+      - ./opensearch:/usr/share/opensearch/data
+
+  kinesis-consumer:
+    build: ./kinesis-consumer
+    depends_on:
+      - localstack
+      - opensearch
+    environment:
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - OPENSEARCH_ENDPOINT=http://opensearch:9200
+      - KINESIS_STREAM_NAME=file-upload-stream
+      - S3_BUCKET=s3-upload-bucket
