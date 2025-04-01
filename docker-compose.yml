@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack
+    container_name: localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,kinesis
+      - DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - PERSISTENCE=1
+      - DATA_DIR=/var/lib/localstack  # Use non-tmp directory
+      - HOST_TMP_FOLDER=/tmp/localstack  # Explicit temp directory
+    volumes:
+      - ./localstack/data:/var/lib/localstack  # Persistent data
+      - /var/run/docker.sock:/var/run/docker.sock  # Re-added Docker socket
+
+  localstack-init:
+    image: amazon/aws-cli:2.13.22
+    container_name: localstack-init
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+    entrypoint: /bin/sh -c
+    command: |
+      "
+      # Create S3 bucket
+      aws --endpoint-url=http://localstack:4566 s3 mb s3://s3-upload-bucket
+      
+      # Create Kinesis stream
+      aws --endpoint-url=http://localstack:4566 kinesis create-stream --stream-name file-upload-stream --shard-count 1
+      
+      echo 'Initialization complete!'
+      "

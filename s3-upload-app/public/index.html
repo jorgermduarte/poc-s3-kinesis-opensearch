@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 File Upload</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .upload-form {
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            display: none;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #kinesisRecords {
+            margin-top: 20px;
+            display: none;
+        }
+        pre {
+            white-space: pre-wrap; /* Wrap text inside the <pre> */
+            word-wrap: break-word; /* Ensures long words don't overflow */
+            overflow-x: auto; /* Allows horizontal scrolling if needed */
+            max-width: 100%; /* Prevents it from exceeding its container */
+        }
+    </style>
+</head>
+<body>
+    <h1>S3 File Upload</h1>
+
+    <div class="upload-form">
+        <h2>Upload a File</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div>
+                <input type="file" id="fileInput" name="file" required>
+            </div>
+            <div style="margin-top: 20px;">
+                <button type="submit">Upload to S3</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- The user can select files that exists on /json-samples using that endpoint to get the files -->
+    <div class="upload-form">
+        <h2>Product samples from /json-samples</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div id="json-samples"> </div>
+        </form>
+    </div>
+    <script>
+        // This script is used to fetch the files from /json-samples and populate the file input field
+        async function fetchFiles() {
+            try {
+                const response = await fetch('http://localhost:3000/json-samples');
+                const files = await response.json();
+
+                // craete a list of files and append to the json-samples id div
+                const jsonSamplesDiv = document.getElementById('json-samples');
+
+                files.forEach(file => {
+                    const fileButton = document.createElement('button');
+                    fileButton.textContent = file;
+                    fileButton.type = 'button';
+                    fileButton.style.backgroundColor = 'gray';
+                    fileButton.onclick = function() {
+                        const fileInput = document.getElementById('fileInput');
+                        const dataTransfer = new DataTransfer();
+                        dataTransfer.items.add(new File([file], file, { type: 'application/json' }));
+                        fileInput.files = dataTransfer.files;
+                    };
+                    jsonSamplesDiv.appendChild(fileButton);
+                });
+                
+            } catch (error) {
+                console.error('Error fetching files:', error);
+            }
+        }
+
+        // Call the function to fetch files when the page loads
+        window.onload = fetchFiles;
+    </script>
+
+    <div id="result" class="result">
+        <h3>Upload Result</h3>
+        <pre id="resultContent"></pre>
+        <button id="checkKinesis">Check Kinesis Records</button>
+    </div>
+
+    <div id="kinesisRecords" class="result">
+        <h3>Kinesis Records</h3>
+        <pre id="kinesisContent"></pre>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('fileInput');
+            const resultDiv = document.getElementById('result');
+            const resultContent = document.getElementById('resultContent');
+
+            if (!fileInput.files.length) {
+                alert('Please select a file to upload');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                resultDiv.style.display = 'block';
+                resultContent.textContent = 'Uploading file...';
+
+                const response = await fetch('http://localhost:3000/kinesis/s3/files', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                resultContent.textContent = JSON.stringify(data, null, 2);
+
+                if (response.ok) {
+                    // Success message
+                    alert('File uploaded successfully!');
+                } else {
+                    // Error message
+                    alert('Error uploading file: ' + data.error);
+                }
+            } catch (error) {
+                resultContent.textContent = 'Error: ' + error.message;
+                alert('Error uploading file');
+            }
+        });
+
+        document.getElementById('checkKinesis').addEventListener('click', async function() {
+            const kinesisDiv = document.getElementById('kinesisRecords');
+            const kinesisContent = document.getElementById('kinesisContent');
+
+           try {
+                kinesisDiv.style.display = 'block';
+                kinesisContent.textContent = 'Fetching Kinesis records...';
+                
+                const response = await fetch('http://localhost:3000/kinesis/records');
+                const data = await response.json();
+                
+                kinesisContent.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                kinesisContent.textContent = 'Error fetching Kinesis records: ' + error.message;
+            }
+        });
+    </script>
+</body>
+</html>
