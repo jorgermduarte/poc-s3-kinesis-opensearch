@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@aws-sdk/client-kinesis": "^3.782.0",
+    "@faker-js/faker": "^9.6.0",
+    "dotenv": "^16.4.7",
+    "faker": "^6.6.6"
+  }
+}

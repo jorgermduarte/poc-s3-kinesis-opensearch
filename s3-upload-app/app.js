@@ -55,23 +55,16 @@ app.post('/kinesis/s3/files', upload.single('file'), async (req, res) => {
       ContentType: req.file.mimetype
     };
 
-    const s3Result = await s3Client.send(new PutObjectCommand(s3Params));
+    await s3Client.send(new PutObjectCommand(s3Params));
 
     // Send event to Kinesis
     const kinesisParams = {
       StreamName: KINESIS_STREAM_NAME,
-      Data: Buffer.from(JSON.stringify({
-        bucket: BUCKET_NAME,
-        key: fileName,
-        size: req.file.size,
-        contentType: req.file.mimetype,
-        timestamp: new Date().toISOString()
-      })),
-      PartitionKey: `upload-${Date.now()}`
+      Data: Buffer.from(JSON.stringify(fileContent)),
+      PartitionKey: `product-${Date.now()}`
     };
-    
+
     const kinesisResult = await kinesisClient.send(new PutRecordCommand(kinesisParams));
-    
     // Clean up the uploaded file
     fs.unlinkSync(req.file.path);
     

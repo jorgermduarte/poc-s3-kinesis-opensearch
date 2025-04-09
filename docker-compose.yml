@@ -52,6 +52,7 @@ services:
     volumes:
       - ./opensearch:/usr/share/opensearch/data
 
+      
   kinesis-consumer:
     build: ./kinesis-consumer
     depends_on:

@@ -1,11 +1,14 @@
-const { KinesisClient, GetShardIteratorCommand, GetRecordsCommand } = require('@aws-sdk/client-kinesis');
-const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client } = require('@aws-sdk/client-s3');
 const { Client } = require('@opensearch-project/opensearch');
-// import .env variables
+const { StandardRetryStrategy } = require("@aws-sdk/middleware-retry");
+const { defaultProvider } = require("@aws-sdk/credential-provider-node");
+const { KinesisClient, GetShardIteratorCommand, GetRecordsCommand, DescribeStreamCommand } = require('@aws-sdk/client-kinesis');
+const { NodeHttpHandler } = require('@smithy/node-http-handler'); // Added HTTP handler
+
+const http = require('http');
 const dotenv = require('dotenv');
 dotenv.config();
 
-// Configuration
 const config = {
   kinesis: {
     region: process.env.AWS_REGION,
@@ -13,7 +16,15 @@ const config = {
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    }
+    },
+    retryStrategy: new StandardRetryStrategy(
+      defaultProvider(),
+      {
+        maxAttempts: 5, // Increase retry attempts
+        retryDelay: 3000, // Add delay between retries
+      }
+    ),
+    requestHandler: new NodeHttpHandler({ http2: false }), // Force HTTP/1.1
   },
   s3: {
     region: process.env.AWS_REGION,
@@ -26,6 +37,12 @@ const config = {
   },
   opensearch: {
     node: process.env.OPENSEARCH_ENDPOINT,
+    ssl: {
+      rejectUnauthorized: false,
+    },
+    agent: {
+      http: new http.Agent({ keepAlive: true })
+    },
     auth: {
       username: 'admin',
       password: 'admin'
@@ -40,24 +57,8 @@ const osClient = new Client(config.opensearch);
 
 async function initOpenSearch() {
   try {
-    const indexExists = await osClient.indices.exists({ index: 'files' });
+    const indexExists = await osClient.indices.exists({ index: 'products' });
     if (indexExists.statusCode !== 404) return;
-
-    await osClient.indices.create({
-      index: 'files',
-      body: {
-        mappings: {
-          properties: {
-            fileName: { type: 'text' },
-            content: { type: 'text' },
-            contentType: { type: 'keyword' },
-            size: { type: 'integer' },
-            timestamp: { type: 'date' },
-            s3Location: { type: 'keyword' }
-          }
-        }
-      }
-    });
 
     await osClient.indices.create({
       index: 'products',
@@ -73,91 +74,67 @@ async function initOpenSearch() {
       }
     });
 
-    console.log('Created OpenSearch index');
+    console.log('Created OpenSearch index for products');
   } catch (error) {
     console.error('OpenSearch init error:', error);
   }
 }
-
 async function processRecord(record) {
   try {
-    const payload = JSON.parse(Buffer.from(record.Data).toString('utf-8'));
-    
-    // Get file from S3
-    const { Body } = await s3Client.send(new GetObjectCommand({
-      Bucket: payload.bucket,
-      Key: payload.key
-    }));
-    
-    // Process file content
-    const content = await streamToString(Body);
-    
-    // Index in OpenSearch
-    await osClient.index({
-      index: 'files',
-      body: {
-        fileName: payload.key,
-        content: content,
-        contentType: payload.contentType,
-        size: payload.size,
-        timestamp: payload.timestamp,
-        s3Location: `s3://${payload.bucket}/${payload.key}`
-      }
-    });
-
-    const productData = JSON.parse(content);
+    const payload = Buffer.from(record.Data).toString('utf-8');
+    const parsedOnce = JSON.parse(payload); // Could be a string
+    const productData = typeof parsedOnce === 'string' ? JSON.parse(parsedOnce) : parsedOnce;
+    const { id, name } = productData;
 
     await osClient.index({
       index: 'products',
-      body: {
-        id: productData.id,
-        name: productData.name,
-        description: productData.description,
-        price: productData.price,
-      }
+      body: productData
     });
-    
-    console.log(`Indexed file: ${payload.key}`);
-  } catch (error) {
-    console.error('Processing error:', error);
-  }
-}
 
-async function streamToString(stream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on('data', chunk => chunks.push(chunk));
-    stream.on('error', reject);
-    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-  });
+    console.log(`Indexed product: ${id} - ${name}`);
+  } catch (error) {
+    console.error('Processing Index for product:', error.message);
+  }
 }
 
 async function main() {
   await initOpenSearch();
-  
-  // Get shard iterator
-  let { ShardIterator } = await kinesisClient.send(
-    new GetShardIteratorCommand({
-      StreamName: process.env.KINESIS_STREAM_NAME,
-      ShardId: 'shardId-000000000000',
-      ShardIteratorType: 'LATEST'
-    })
-  );
+  const streamName = process.env.KINESIS_STREAM_NAME;
 
-  // Poll for records
-  while (true) {
-    const { Records, NextShardIterator } = await kinesisClient.send(
-      new GetRecordsCommand({ ShardIterator })
+  try {
+    const { StreamDescription } = await kinesisClient.send(
+      new DescribeStreamCommand({ StreamName: streamName })
     );
+    const shardId = StreamDescription.Shards[0].ShardId;
 
-    if (Records.length > 0) {
-      for (const record of Records) {
-        await processRecord(record);
+    let ShardIterator = (await kinesisClient.send(
+      new GetShardIteratorCommand({
+        StreamName: streamName,
+        ShardId: shardId,
+        ShardIteratorType: 'LATEST'
+      })
+    )).ShardIterator;
+
+    while (true) {
+      try {
+        const { Records, NextShardIterator } = await kinesisClient.send(
+          new GetRecordsCommand({ ShardIterator })
+        );
+
+        if (Records?.length) {
+          await Promise.all(Records.map(processRecord));
+        }
+
+        ShardIterator = NextShardIterator;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        console.error('GetRecords error:', error.message);
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Backoff on error
       }
     }
-
-    ShardIterator = NextShardIterator;
-    await new Promise(resolve => setTimeout(resolve, 1000));
+  } catch (error) {
+    console.error('Fatal error:', error.message);
+    process.exit(1);
   }
 }
 
